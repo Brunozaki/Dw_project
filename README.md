@@ -23,10 +23,13 @@ Os dados ficam em volumes do Docker e sobrevivem à recriação dos containers.
 ## Estrutura
 
 ```text
-dags/       DAGs do Airflow
-scripts/    Configuração do ambiente
-sql/dw/     Criação do DW, executada na primeira subida do volume
+dags/          DAGs do Airflow
+documentacao/  Guias detalhados, organizados como as pastas do projeto
+scripts/       Configuração do ambiente
+sql/dw/        Criação do DW, executada na primeira subida do volume
 ```
+
+Para instalar o projeto do zero, siga o guia [Como aplicar](documentacao/como-aplicar.md).
 
 ## Como rodar
 
