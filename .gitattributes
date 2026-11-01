@@ -1,0 +1,2 @@
+# Os arquivos rodam no Linux: mantém LF mesmo com core.autocrlf=true no Windows.
+* text=auto eol=lf
