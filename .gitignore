@@ -3,6 +3,7 @@
 
 # Dados gerados
 data/
+backups/
 
 # Python
 __pycache__/

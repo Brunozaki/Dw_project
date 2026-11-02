@@ -1,0 +1,36 @@
+name: Testes
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.11
+        env:
+          POSTGRES_USER: dw_admin
+          POSTGRES_PASSWORD: teste
+          POSTGRES_DB: dw_logistica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dw_admin -d dw_logistica"
+          --health-interval 5s
+          --health-retries 10
+    env:
+      PGPASSWORD: teste
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - run: pytest
+      - name: Aplicar o SQL do DW
+        run: |
+          for arquivo in sql/dw/*.sql; do
+            psql -h localhost -U dw_admin -d dw_logistica -v ON_ERROR_STOP=1 -f "$arquivo"
+          done

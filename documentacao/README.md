@@ -33,6 +33,8 @@ A documentação segue a mesma organização do projeto:
 | `scripts/` | [scripts/README.md](scripts/README.md) | Scripts que preparam o ambiente |
 | `sql/dw/` | [sql/dw/README.md](sql/dw/README.md) | Estrutura do banco de dados |
 
+Os testes ficam em `tests/` e rodam no GitHub a cada envio, junto com a aplicação do SQL em um banco vazio.
+
 ## Palavras usadas nos guias
 
 | Termo | Significado |
@@ -45,3 +47,4 @@ A documentação segue a mesma organização do projeto:
 | **Tabela fato** | Tabela que guarda os acontecimentos, como cada entrega realizada. |
 | **Tabela dimensão** | Tabela que descreve os acontecimentos, como quem transportou e para onde foi. |
 | **Modelo estrela** | Organização com uma tabela fato no centro, ligada às tabelas dimensão. |
+| **Lote** | Conjunto de dados de um dia. A primeira carga, com todo o histórico, também conta como lote. |

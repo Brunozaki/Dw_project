@@ -7,10 +7,50 @@ Esta pasta guarda as **DAGs**, os arquivos Python que dizem ao Airflow o que faz
 | Arquivo | Motivo de existir |
 |---|---|
 | `dw_healthcheck.py` | Testa todo dia se o data warehouse está acessível e completo |
+| `dw_carga_logistica.py` | Carrega os dados de logística todo dia |
+| `logistica/carga.py` | Regras da carga: quais lotes faltam, como copiá-los e como validá-los |
+| `logistica/auditoria.py` | Grava as execuções e as falhas em `audit.load_run` |
+| `logistica/sql/` | Consultas que levam os dados de `staging` para `marts` |
+
+## `dw_carga_logistica.py`
+
+**Por que existe:** é a automação principal do projeto. Ela leva os arquivos de `data/` até o modelo estrela.
+
+**Quando roda:** todo dia às 05:00, no horário de São Paulo, se estiver ativada.
+
+**O que ela faz, em ordem:**
+
+1. Grava a execução em `audit.load_run` com o status `running`.
+2. Compara a tabela `audit.loaded_batch` com os arquivos, para descobrir quais lotes faltam. Só entram dias já encerrados.
+3. Para cada lote, em ordem:
+   - copia os arquivos para `raw`, substituindo uma cópia anterior do mesmo lote;
+   - atualiza as dimensões em `marts`;
+   - roda as validações;
+   - atualiza as tabelas fato em `marts`;
+   - registra o lote em `audit.loaded_batch`.
+4. Grava `success` e o total de linhas.
+
+Na primeira execução, o primeiro lote é a foto inicial, que traz o histórico e os cadastros. Ele leva vários minutos. Os lotes diários são pequenos e levam segundos.
+
+**Dias perdidos não se perdem.** A lista de lotes vem do banco, não do horário agendado. Se o computador ficar desligado por uma semana, a próxima execução carrega os sete lotes, em ordem.
+
+**A carga pode ser repetida.** Cada lote roda em uma transação: ou entra por inteiro, ou nada dele fica no banco. Pedidos e entregas que já existem são atualizados, não duplicados.
+
+### Quando a carga falha
+
+O Airflow tenta mais 2 vezes. Se continuar falhando, a execução fica com o status `failed`, e o motivo vai para a coluna `error`:
+
+```bash
+docker compose exec postgres-dw psql -U dw_admin -d dw_logistica -c "SELECT dag_id, status, error, finished_at FROM audit.load_run WHERE status = 'failed';"
+```
+
+Lotes anteriores continuam carregados. Corrija o problema e clique em **Acionar**: a carga retoma do lote que falhou.
+
+**Validações:** impedem que um lote com problema chegue em `marts`. Elas reprovam linhas duplicadas, status desconhecido, valores negativos, entrega antes do envio e referências para cadastros ou pedidos que não existem. A mensagem de erro diz qual regra falhou e em quantas linhas. A lista fica em `VALIDACOES`, em `logistica/carga.py`.
 
 ## `dw_healthcheck.py`
 
-**Por que existe:** antes de carregar dados reais, é preciso provar que Airflow e banco conversam entre si. Esta DAG faz isso e serve de modelo para as próximas. Ela **não carrega dados de logística**.
+**Por que existe:** prova que Airflow e banco conversam entre si e serve de modelo simples para novas DAGs. Ela **não carrega dados de logística**.
 
 **Quando roda:** todo dia às 06:00, no horário de São Paulo, se estiver ativada.
 
@@ -33,7 +73,8 @@ Como a segunda tarefa só roda se a primeira funcionar, cada linha em `audit.loa
 | `start_date` | Data a partir da qual a DAG pode rodar |
 | `catchup=False` | Não executa todos os dias perdidos enquanto o computador esteve desligado, apenas o agendamento mais recente |
 | `retries` e `retry_delay` | Se uma tarefa falhar, tenta mais 2 vezes, com 5 minutos de intervalo |
-| `ON CONFLICT ... DO NOTHING` | Evita linha duplicada se a mesma execução for repetida |
+| `on_failure_callback` | Grava a falha em `audit.load_run` depois da última tentativa |
+| `registrar_execucao` | Grava a execução, sem duplicar se ela for repetida |
 
 ### Exemplos de horário
 

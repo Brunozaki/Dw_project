@@ -167,7 +167,39 @@ Ao ativar a DAG, o Airflow pode rodar sozinho o agendamento mais recente. Por is
 docker compose exec postgres-dw psql -U dw_admin -d dw_logistica -c "SELECT * FROM audit.load_run;"
 ```
 
-Se chegou até aqui, o projeto está funcionando.
+## Etapa 11: gerar e carregar os dados
+
+Instale o suporte a ambientes Python, se ainda não tiver:
+
+```bash
+sudo apt install -y python3-venv
+```
+
+Gere os arquivos. Isso leva alguns minutos e ocupa cerca de 2,3 GB:
+
+```bash
+python3 -m venv .venv
+```
+
+```bash
+.venv/bin/pip install -r requirements.txt
+```
+
+```bash
+.venv/bin/python scripts/gerar_dados_logistica.py
+```
+
+No Airflow, ative a DAG `dw_carga_logistica` e clique em **Acionar**. A primeira carga traz todo o histórico, com cerca de 9 milhões de linhas, e leva cerca de 10 minutos.
+
+Assim como na Etapa 10, podem aparecer duas execuções. Elas rodam uma de cada vez, e a segunda não encontra nada novo.
+
+**Como saber se deu certo:** rode o comando abaixo. Ele deve mostrar uma linha com `dw_carga_logistica`, `success` e a quantidade de linhas carregadas. Se houver uma segunda execução, ela aparece com `0` linhas.
+
+```bash
+docker compose exec postgres-dw psql -U dw_admin -d dw_logistica -c "SELECT dag_id, status, rows_loaded, finished_at FROM audit.load_run ORDER BY finished_at DESC LIMIT 3;"
+```
+
+Se chegou até aqui, o projeto está funcionando. A partir de agora, a carga roda todo dia às 05:00.
 
 ## Uso no dia a dia
 
@@ -180,6 +212,7 @@ Rode os comandos abaixo na pasta do projeto, no terminal do Ubuntu.
 | Parar os serviços, mantendo os dados | `docker compose stop` |
 | Ver as mensagens de um serviço | `docker compose logs -f airflow-scheduler` |
 | Abrir o banco de dados | `docker compose exec postgres-dw psql -U dw_admin -d dw_logistica` |
+| Fazer uma cópia do banco | `bash scripts/backup-dw.sh` |
 
 Para sair da visualização de mensagens, pressione `Ctrl + C`. Para sair do banco de dados, digite `\q`.
 
@@ -195,9 +228,12 @@ Para sair da visualização de mensagens, pressione `Ctrl + C`. Para sair do ban
 | Usuário | `dw_admin` |
 | Senha | o valor de `DW_PASSWORD`, no arquivo `.env` |
 
+Para relatórios, prefira um usuário somente leitura, como explica o guia de [`sql/dw`](sql/dw/README.md#usuário-somente-leitura).
+
 ## Cuidados importantes
 
-- **Mantenha o computador ligado e o Ubuntu aberto no horário da carga.** Sem isso, a carga não roda. Ao voltar, o Airflow executa apenas o agendamento mais recente que foi perdido, não todos os dias que passaram.
+- **Mantenha o computador ligado e o Ubuntu aberto no horário da carga.** Sem isso, a carga não roda. Ao voltar, o Airflow executa o agendamento mais recente, e essa execução carrega todos os lotes dos dias que passaram.
+- **Faça cópias do banco.** O comando `bash scripts/backup-dw.sh` guarda as 7 cópias mais recentes em `backups/`. Copie-as para outro disco, porque uma cópia no mesmo disco não protege contra a perda dele.
 - **Não use `docker compose down -v` sem ter certeza.** A opção `-v` apaga os volumes e, com eles, **todos os dados do data warehouse**. Sem o `-v`, os dados são mantidos.
 - **Não apague o arquivo `.env`.** As senhas dos bancos já criados estão nele. Sem o arquivo, os serviços não conseguem se conectar.
 
@@ -219,3 +255,5 @@ Para sair da visualização de mensagens, pressione `Ctrl + C`. Para sair do ban
 | Serviço como `unhealthy` | Erro no serviço | Rode `docker compose logs nome-do-servico` e leia as últimas linhas |
 | DAG não aparece no Airflow | Erro no arquivo ou leitura pendente | Espere alguns minutos e veja `docker compose logs airflow-dag-processor` |
 | Tabelas não existem no banco | O volume foi criado antes dos arquivos SQL | Veja [Como alterar as tabelas](sql/dw/README.md#como-alterar-as-tabelas) |
+| `manifesto.json não existe` na carga | Os dados não foram gerados | Rode a Etapa 11 e acione a DAG de novo |
+| `Lote ... reprovado na validação` | Dados com problema | Veja [Quando a carga falha](dags/README.md#quando-a-carga-falha) |

@@ -175,6 +175,7 @@ AIRFLOW__CORE__EXECUTION_API_SERVER_URL=http://localhost:8080/execution/
 AIRFLOW__API_AUTH__JWT_SECRET=$AIRFLOW_JWT_SECRET
 AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:$AIRFLOW_DB_PASSWORD@127.0.0.1/airflow
 AIRFLOW_CONN_DW_POSTGRES=postgresql://dw_admin:$DW_PASSWORD@127.0.0.1:5432/dw_logistica
+DW_DATA_DIR=/opt/dw_project/data
 ENV
 sudo chown root:airflow /etc/airflow/airflow.env
 sudo chmod 640 /etc/airflow/airflow.env
@@ -194,6 +195,7 @@ Como o arquivo tem senhas, só o `root` e o usuário `airflow` conseguem lê-lo.
 | `EXECUTION_API_SERVER_URL` | Endereço pelo qual as tarefas falam com o Airflow |
 | `SQL_ALCHEMY_CONN` | Conexão com o banco interno do Airflow |
 | `AIRFLOW_CONN_DW_POSTGRES` | Conexão `dw_postgres`, usada pelas DAGs para acessar o DW |
+| `DW_DATA_DIR` | Pasta dos arquivos gerados, lidos pela carga |
 
 Crie também um atalho para rodar comandos do Airflow já com essa configuração:
 
@@ -401,6 +403,39 @@ PGPASSWORD="$DW_PASSWORD" psql -h 127.0.0.1 -U dw_admin -d dw_logistica -c "SELE
 ```
 
 Mensagens sobre `graphviz` e `FileType is deprecated` nesses comandos são apenas avisos e podem ser ignoradas. O `dags unpause` pode mostrar `is_paused` como `True` mesmo tendo funcionado; o que vale é a execução aparecer como `success`.
+
+## Etapa 13: gerar e carregar os dados
+
+Gere os arquivos. Isso leva alguns minutos e ocupa cerca de 2,3 GB:
+
+```bash
+sudo python3 -m venv /opt/dw_project/.venv
+```
+
+```bash
+sudo /opt/dw_project/.venv/bin/pip install -r /opt/dw_project/requirements.txt
+```
+
+```bash
+cd /opt/dw_project && sudo .venv/bin/python scripts/gerar_dados_logistica.py
+```
+
+Ative a carga e mande rodar. A primeira carga traz todo o histórico, com cerca de 9 milhões de linhas, e leva cerca de 10 minutos:
+
+```bash
+sudo -u airflow airflow-dw dags unpause dw_carga_logistica
+```
+
+```bash
+sudo -u airflow airflow-dw dags trigger dw_carga_logistica
+```
+
+**Como saber se deu certo:** o comando abaixo mostra uma linha com `dw_carga_logistica`, `success` e a quantidade de linhas carregadas.
+
+```bash
+source ~/dw-segredos.env
+PGPASSWORD="$DW_PASSWORD" psql -h 127.0.0.1 -U dw_admin -d dw_logistica -c "SELECT dag_id, status, rows_loaded, finished_at FROM audit.load_run ORDER BY finished_at DESC LIMIT 3;"
+```
 
 Se chegou até aqui, o projeto está funcionando, e os serviços voltam sozinhos quando o servidor reinicia.
 

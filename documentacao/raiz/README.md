@@ -10,6 +10,8 @@ A raiz é a pasta principal do projeto. Ela guarda os arquivos que configuram o 
 | `.gitignore` | Lista o que o Git deve ignorar | Ao surgir um arquivo que não deve ser versionado |
 | `.gitattributes` | Mantém os arquivos no formato usado pelo Linux | Raramente |
 | `README.md` | Apresenta o projeto na página do GitHub | Ao mudar a visão geral do projeto |
+| `requirements.txt` | Fixa a versão do DuckDB, usado pelo gerador de dados | Ao trocar a versão, o que muda os dados gerados |
+| `.github/workflows/testes.yml` | Roda os testes e aplica o SQL no GitHub a cada envio | Ao adicionar uma etapa de verificação |
 
 ## `docker-compose.yml`
 
@@ -33,6 +35,7 @@ O arquivo define seis serviços:
 - **Sem o serviço `triggerer`:** ele só é necessário para tarefas que esperam eventos externos sem ocupar recursos, e nenhuma DAG usa isso. Por isso, o item **Disparador** aparece em vermelho na tela do Airflow, o que é esperado.
 - **Versões fixas:** `apache/airflow:3.3.2` e `postgres:17.11` garantem que todos usem as mesmas versões. Versões novas só entram quando alguém altera o arquivo e testa.
 - **Volumes:** os dados dos bancos e os logs ficam em `postgres-dw-data`, `postgres-airflow-data` e `airflow-logs`. Eles sobrevivem à recriação dos containers.
+- **Pasta `data/` somente leitura:** o Airflow lê os arquivos gerados em `/opt/airflow/data`, mas não consegue alterá-los.
 - **Acesso só pelo próprio computador:** as portas usam `127.0.0.1`, então outras máquinas da rede não acessam os serviços.
 - **`restart: unless-stopped`:** se um serviço falhar, o Docker o reinicia. Isso não acontece se você mesmo o tiver parado.
 - **Senhas obrigatórias:** a marcação `${VARIAVEL:?}` impede a subida se faltar uma configuração. Assim, nenhum serviço roda com senha vazia ou padrão.

@@ -11,7 +11,10 @@ Esta pasta guarda os arquivos que criam a estrutura do data warehouse: schemas, 
 | Arquivo | Motivo de existir |
 |---|---|
 | `01_schemas.sql` | Cria as camadas do data warehouse e o registro de cargas |
-| `02_marts_logistica.sql` | Cria o modelo estrela inicial de logística |
+| `02_marts_logistica.sql` | Cria o modelo estrela de logística |
+| `03_raw.sql` | Cria as tabelas de chegada dos arquivos |
+| `04_staging.sql` | Cria as visões que limpam os dados |
+| `05_acesso_leitura.sql` | Cria o papel `dw_leitura`, para relatórios |
 
 ## `01_schemas.sql`
 
@@ -39,32 +42,43 @@ Origem → raw → staging → marts → relatórios
 | `load_run_id` | Número único da execução, gerado automaticamente |
 | `dag_id` | Nome da DAG |
 | `run_id` | Identificador da execução no Airflow |
-| `status` | Resultado da execução |
+| `status` | `running`, `success` ou `failed` |
 | `rows_loaded` | Quantidade de linhas carregadas |
-| `finished_at` | Data e hora do registro |
+| `error` | Motivo da falha, quando houver |
+| `finished_at` | Data e hora do último registro |
 
 A combinação de `dag_id` e `run_id` não se repete, então uma execução não é registrada duas vezes.
 
+### Tabela `audit.loaded_batch`
+
+**Por que existe:** guarda quais lotes já entraram no banco. A carga usa essa lista para saber o que falta, inclusive depois de dias parada.
+
 ## `02_marts_logistica.sql`
 
-**Por que existe:** define o modelo estrela, que deixa as perguntas de negócio simples de responder, como "qual transportadora mais atrasa?".
-
-> **Atenção:** este é um modelo inicial, pois a fonte de dados real ainda não foi definida. Colunas e tabelas devem ser revistas quando ela for escolhida.
+**Por que existe:** define o modelo estrela, que deixa as perguntas de negócio simples de responder, como "qual transportadora mais atrasa?". As colunas seguem os arquivos de `scripts/gerar_dados_logistica.py`.
 
 ```text
- dim_carrier     dim_date
-          \       /
-        fact_shipment
-              |
-         dim_location
+ dim_customer   dim_distribution_center   dim_product
+          \            |                 /
+           fact_order ---- fact_order_item
+              |      \
+              |       fact_invoice
+              |      /
+           fact_shipment ---- dim_carrier, dim_location
 ```
 
 | Tabela | Tipo | Conteúdo |
 |---|---|---|
+| `marts.fact_order` | Fato | Uma linha por pedido, com status e valores |
+| `marts.fact_order_item` | Fato | Uma linha por item de pedido |
+| `marts.fact_invoice` | Fato | Uma linha por nota fiscal |
 | `marts.fact_shipment` | Fato | Uma linha por entrega |
 | `marts.dim_date` | Dimensão | Uma linha por dia, de 2020 a 2035 |
-| `marts.dim_carrier` | Dimensão | Transportadoras |
-| `marts.dim_location` | Dimensão | Origens e destinos |
+| `marts.dim_customer` | Dimensão | Clientes |
+| `marts.dim_product` | Dimensão | Produtos |
+| `marts.dim_distribution_center` | Dimensão | Centros de distribuição |
+| `marts.dim_carrier` | Dimensão | Transportadoras e seu modal |
+| `marts.dim_location` | Dimensão | Cidades, com região e coordenadas |
 
 ### `marts.fact_shipment`
 
@@ -72,14 +86,21 @@ A combinação de `dag_id` e `run_id` não se repete, então uma execução não
 |---|---|
 | `shipment_key` | Número interno da entrega |
 | `shipment_code` | Código da entrega no sistema de origem. Não se repete |
+| `order_key` | Pedido entregue |
+| `invoice_key` | Nota fiscal da entrega |
 | `carrier_key` | Transportadora |
 | `origin_location_key` | Local de origem |
 | `destination_location_key` | Local de destino |
 | `shipped_date_key` | Data de envio |
 | `promised_date_key` | Data prometida. Pode ficar vazia |
 | `delivered_date_key` | Data de entrega. Fica vazia até a entrega acontecer |
+| `transport_mode` | Modal usado |
+| `distance_km` | Distância aproximada |
 | `weight_kg` | Peso em quilos |
+| `volume_m3` | Volume em metros cúbicos |
 | `freight_cost` | Custo do frete |
+| `occurrence` | Ocorrência da entrega, como atraso ou avaria |
+| `is_late` | Se atrasou. Calculada pelo banco, fica vazia até a entrega acontecer |
 | `load_run_id` | Carga que trouxe a linha, ligada a `audit.load_run` |
 
 ### Por que existe uma tabela de datas
@@ -103,6 +124,30 @@ ORDER BY custo_total DESC;
 ```
 
 O resultado fica vazio até existir uma carga de dados.
+
+## `03_raw.sql`
+
+**Por que existe:** guarda os arquivos como vieram, com todas as colunas em texto. Assim, um valor estranho chega ao banco e pode ser investigado, em vez de impedir a leitura do arquivo.
+
+Cada tabela tem a coluna `lote`, com a data do lote, e `carregado_em`. O mesmo pedido pode aparecer em vários lotes, um para cada mudança de status. Isso guarda o histórico de cada pedido.
+
+## `04_staging.sql`
+
+**Por que existe:** limpa os dados e converte cada coluna para o tipo certo. São visões, não tabelas: não ocupam espaço e sempre refletem o `raw`.
+
+As visões têm o mesmo nome das tabelas do `raw`, como `staging.pedidos`.
+
+## `05_acesso_leitura.sql`
+
+**Por que existe:** relatórios não precisam de permissão para alterar dados. O papel `dw_leitura` só consegue ler `marts` e `audit`.
+
+### Usuário somente leitura
+
+O papel não tem senha e não entra no banco sozinho. Para criar um usuário, abra o banco e rode o comando abaixo, trocando o nome e a senha:
+
+```sql
+CREATE ROLE nome_do_usuario LOGIN PASSWORD 'troque-esta-senha' IN ROLE dw_leitura;
+```
 
 ## Como alterar as tabelas
 
