@@ -8,8 +8,9 @@ Esta pasta guarda os scripts que preparam o ambiente. Um script é um arquivo co
 |---|---|---|
 | `setup-docker-wsl.sh` | Instala o Docker no Ubuntu | Uma vez por computador |
 | `create-env.sh` | Cria o `.env` com senhas aleatórias | Uma vez por computador |
+| `gerar_dados_logistica.py` | Cria dados fictícios de logística em CSV | Quando precisar dos dados ou mudar o volume |
 
-Os dois rodam no **terminal do Ubuntu**, na pasta do projeto. Eles não funcionam no PowerShell.
+Os dois arquivos `.sh` rodam no **terminal do Ubuntu**, na pasta do projeto. Eles não funcionam no PowerShell. O arquivo `.py` roda em qualquer sistema com Python.
 
 ## `setup-docker-wsl.sh`
 
@@ -56,6 +57,57 @@ bash scripts/create-env.sh
 4. Copia o `.env.example` para `.env`, trocando cada `gerar` por um valor aleatório.
 
 **Importante:** se o `.env` for apagado depois que os bancos existirem, as senhas novas não vão coincidir com as gravadas nos bancos. Guarde uma cópia em um local seguro, como um gerenciador de senhas.
+
+## `gerar_dados_logistica.py`
+
+**Por que existe:** nenhuma base pública gratuita reúne produtos, notas fiscais, prazos, valores e frete em grande volume. O script usa o TPC-H, um gerador de dados para testes de banco, como base de pedidos e itens, e simula o restante com dados do Brasil.
+
+**Como rodar:**
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python scripts/gerar_dados_logistica.py
+```
+
+Na primeira execução, o DuckDB precisa de internet para baixar a extensão do TPC-H.
+
+| Opção | Padrão | O que faz |
+|---|---|---|
+| `--escala` | `1` | Define o volume. A escala 1 gera 1,5 milhão de pedidos, 6 milhões de itens e ocupa cerca de 2,2 GB |
+| `--saida` | `data` | Define a pasta dos arquivos |
+| `--data-corte` | `2026-11-01` | Define o que os dados tratam como hoje |
+
+Os mesmos parâmetros e a mesma versão do DuckDB geram os mesmos arquivos. A pasta `data/` fica fora do Git, porque os arquivos são grandes e podem ser recriados.
+
+**O que ele gera:**
+
+| Pasta | Arquivos | Conteúdo |
+|---|---|---|
+| `data/tpch/` | `orders`, `lineitem`, `customer`, `part`, `partsupp`, `supplier`, `nation`, `region` | Base TPC-H original |
+| `data/simulado/` | `locais`, `centros_distribuicao`, `transportadoras` | Cadastros de apoio |
+| `data/simulado/` | `clientes`, `produtos` | Cadastros principais |
+| `data/simulado/` | `pedidos`, `itens_pedido` | Vendas |
+| `data/simulado/` | `notas_fiscais`, `entregas` | Faturamento e transporte |
+
+O arquivo `entregas` tem origem, destino, transportadora, datas, peso e frete, os campos que a tabela `marts.fact_shipment` espera.
+
+**Como os dados são simulados:**
+
+- **Clientes:** são distribuídos entre 70 cidades conforme a população aproximada.
+- **Origem:** cada cliente recebe do centro de distribuição mais próximo.
+- **Prazo:** depende da distância e do modal. Envios e entregas não ocorrem aos domingos.
+- **Atraso:** varia por transportadora e é mais provável no Norte, no Nordeste e em novembro e dezembro.
+- **Frete:** usa peso real ou cubado, distância, tarifa do modal e 0,3% do valor da mercadoria.
+- **Situação do pedido:** cerca de 2% são cancelados. Pedidos recentes podem aparecer como `em_transito` ou `aguardando_envio`.
+- **Nota fiscal:** cada pedido faturado tem uma nota, com chave de 44 dígitos, CFOP e ICMS simplificado.
+
+**Limitações:**
+
+- Empresas, CNPJs, CEPs e endereços são fictícios. Os CNPJs têm dígito verificador errado de propósito, para não coincidir com os reais.
+- As notas não têm valor fiscal, e as alíquotas são uma simplificação.
+- O número de pedidos é quase igual em todos os meses, porque essa distribuição vem do TPC-H.
+- Coordenadas e distâncias são aproximadas. A cabotagem pode aparecer para cidades sem porto.
 
 ## Como criar um script novo
 

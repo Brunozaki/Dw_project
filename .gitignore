@@ -1,6 +1,9 @@
 # Segredos locais
 .env
 
+# Dados gerados
+data/
+
 # Python
 __pycache__/
 *.py[cod]

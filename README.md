@@ -24,8 +24,9 @@ Os dados ficam em volumes do Docker e sobrevivem à recriação dos containers.
 
 ```text
 dags/          DAGs do Airflow
+data/          CSVs gerados, fora do Git
 documentacao/  Guias detalhados, organizados como as pastas do projeto
-scripts/       Configuração do ambiente
+scripts/       Configuração do ambiente e geração de dados
 sql/dw/        Criação do DW, executada na primeira subida do volume
 ```
 
