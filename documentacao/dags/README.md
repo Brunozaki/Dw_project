@@ -31,7 +31,7 @@ Como a segunda tarefa só roda se a primeira funcionar, cada linha em `audit.loa
 | `EXPECTED_SCHEMAS` | Lista dos schemas obrigatórios |
 | `schedule="0 6 * * *"` | Horário de execução. Os campos são: minuto, hora, dia, mês e dia da semana |
 | `start_date` | Data a partir da qual a DAG pode rodar |
-| `catchup=False` | Não executa dias perdidos enquanto o computador esteve desligado |
+| `catchup=False` | Não executa todos os dias perdidos enquanto o computador esteve desligado, apenas o agendamento mais recente |
 | `retries` e `retry_delay` | Se uma tarefa falhar, tenta mais 2 vezes, com 5 minutos de intervalo |
 | `ON CONFLICT ... DO NOTHING` | Evita linha duplicada se a mesma execução for repetida |
 
@@ -52,7 +52,7 @@ Como a segunda tarefa só roda se a primeira funcionar, cada linha em `audit.loa
 4. Escreva as tarefas e ajuste o `schedule`.
 5. Salve na pasta `dags/`.
 6. Espere alguns minutos até a DAG aparecer no site.
-7. Ative a DAG e clique em **Trigger** para testar.
+7. Ative a DAG e clique em **Acionar** para testar.
 
 Se ela não aparecer, procure o erro neste comando:
 

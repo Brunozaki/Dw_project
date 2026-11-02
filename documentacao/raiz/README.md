@@ -30,6 +30,7 @@ O arquivo define seis serviços:
 
 - **Dois bancos separados:** assim, os dados do negócio não se misturam com os dados internos do Airflow. Um pode ser recriado sem afetar o outro.
 - **`LocalExecutor`:** as tarefas rodam dentro do próprio scheduler. Para uma só máquina, isso dispensa serviços extras, como Redis e Celery.
+- **Sem o serviço `triggerer`:** ele só é necessário para tarefas que esperam eventos externos sem ocupar recursos, e nenhuma DAG usa isso. Por isso, o item **Disparador** aparece em vermelho na tela do Airflow, o que é esperado.
 - **Versões fixas:** `apache/airflow:3.3.2` e `postgres:17.11` garantem que todos usem as mesmas versões. Versões novas só entram quando alguém altera o arquivo e testa.
 - **Volumes:** os dados dos bancos e os logs ficam em `postgres-dw-data`, `postgres-airflow-data` e `airflow-logs`. Eles sobrevivem à recriação dos containers.
 - **Acesso só pelo próprio computador:** as portas usam `127.0.0.1`, então outras máquinas da rede não acessam os serviços.

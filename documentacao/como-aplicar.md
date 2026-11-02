@@ -1,8 +1,6 @@
 # Como aplicar o projeto
 
-Este guia leva um computador com Windows até o projeto funcionando. Siga as etapas na ordem e não pule a verificação no final de cada uma.
-
-> **Atenção:** a configuração do Docker e dos serviços ainda não foi executada do início ao fim. Se uma etapa falhar, consulte [Problemas comuns](#problemas-comuns).
+Este guia leva um computador com Windows até o projeto funcionando. Siga as etapas na ordem e não pule a verificação no final de cada uma. Se uma etapa falhar, consulte [Problemas comuns](#problemas-comuns).
 
 ## Antes de começar
 
@@ -150,14 +148,20 @@ grep AIRFLOW_ADMIN_PASSWORD .env
 2. No navegador, abra http://localhost:8080.
 3. Entre com o usuário `admin` e a senha que apareceu.
 
+**Como saber se deu certo:** aparece a tela de boas-vindas. O idioma segue o do seu navegador.
+
+Na seção **Saúde**, o item **Disparador** aparece em vermelho. **Isso é normal:** ele não é usado neste projeto e foi deixado de fora de propósito. Os demais itens devem estar em verde.
+
 ## Etapa 10: testar a automação
 
 1. No Airflow, abra a página **Dags** e clique em `dw_healthcheck`.
 2. Ative a DAG no botão ao lado do nome. Toda DAG nova começa pausada.
-3. Clique em **Trigger** para rodar agora.
+3. Clique em **Acionar**, no canto superior direito, para rodar agora.
 4. Aguarde até as tarefas ficarem verdes.
 
-**Como saber se deu certo:** rode o comando abaixo. Ele deve mostrar uma linha com `dw_healthcheck` e `success`.
+Ao ativar a DAG, o Airflow pode rodar sozinho o agendamento mais recente. Por isso, podem aparecer duas execuções em vez de uma.
+
+**Como saber se deu certo:** rode o comando abaixo. Ele deve mostrar pelo menos uma linha com `dw_healthcheck` e `success`.
 
 ```bash
 docker compose exec postgres-dw psql -U dw_admin -d dw_logistica -c "SELECT * FROM audit.load_run;"
@@ -179,7 +183,7 @@ Rode os comandos abaixo na pasta do projeto, no terminal do Ubuntu.
 
 Para sair da visualização de mensagens, pressione `Ctrl + C`. Para sair do banco de dados, digite `\q`.
 
-**Depois de reiniciar o Windows**, abra o Ubuntu. Os serviços voltam quando o Linux e o Docker iniciam. Se não voltarem, rode `docker compose up -d`.
+**Para os serviços funcionarem, deixe um terminal do Ubuntu aberto.** Sem nenhum terminal aberto, o WSL desliga em menos de um minuto e leva todos os serviços junto. Os dados não se perdem: ao abrir o Ubuntu de novo, os serviços voltam sozinhos em cerca de um minuto. Se não voltarem, rode `docker compose up -d`.
 
 **Para conectar um programa ao banco**, como DBeaver ou Power BI, use:
 
@@ -193,7 +197,7 @@ Para sair da visualização de mensagens, pressione `Ctrl + C`. Para sair do ban
 
 ## Cuidados importantes
 
-- **Mantenha o computador ligado no horário da carga.** O agendamento só roda com o computador ligado e o Ubuntu aberto. A DAG atual não recupera execuções perdidas.
+- **Mantenha o computador ligado e o Ubuntu aberto no horário da carga.** Sem isso, a carga não roda. Ao voltar, o Airflow executa apenas o agendamento mais recente que foi perdido, não todos os dias que passaram.
 - **Não use `docker compose down -v` sem ter certeza.** A opção `-v` apaga os volumes e, com eles, **todos os dados do data warehouse**. Sem o `-v`, os dados são mantidos.
 - **Não apague o arquivo `.env`.** As senhas dos bancos já criados estão nele. Sem o arquivo, os serviços não conseguem se conectar.
 
@@ -209,7 +213,9 @@ Para sair da visualização de mensagens, pressione `Ctrl + C`. Para sair do ban
 | `required variable ... is missing` | O arquivo `.env` não existe | Rode a Etapa 7 |
 | `.env já existe` | A Etapa 7 já foi feita | Nada a fazer: o script protege as senhas atuais |
 | `port is already allocated` | Outro programa usa a porta | Mude `AIRFLOW_PORT` ou `DW_PORT` no `.env` e rode `docker compose up -d` |
-| Localhost não abre | Os serviços não estão prontos | Rode `docker compose ps` e veja se estão `healthy` |
+| Localhost não abre | O WSL desligou por falta de terminal aberto | Abra o Ubuntu, espere um minuto e tente de novo |
+| Localhost continua sem abrir | Os serviços não estão prontos | Rode `docker compose ps` e veja se estão `healthy` |
+| **Disparador** em vermelho no Airflow | Serviço não usado neste projeto | Nada a fazer: é o comportamento esperado |
 | Serviço como `unhealthy` | Erro no serviço | Rode `docker compose logs nome-do-servico` e leia as últimas linhas |
 | DAG não aparece no Airflow | Erro no arquivo ou leitura pendente | Espere alguns minutos e veja `docker compose logs airflow-dag-processor` |
 | Tabelas não existem no banco | O volume foi criado antes dos arquivos SQL | Veja [Como alterar as tabelas](sql/dw/README.md#como-alterar-as-tabelas) |

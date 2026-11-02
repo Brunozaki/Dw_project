@@ -20,6 +20,8 @@ Quatro tecnologias fazem isso funcionar:
 1. Leia o guia [Como aplicar](como-aplicar.md). Ele leva do computador vazio até o projeto funcionando.
 2. Quando quiser entender ou alterar algo, consulte o guia da pasta correspondente.
 
+Se você tem um servidor Linux e prefere instalar tudo à mão, sem Docker, siga o guia [Instalação manual em um Linux limpo](instalacao-manual-linux.md).
+
 ## Guias por pasta
 
 A documentação segue a mesma organização do projeto:
