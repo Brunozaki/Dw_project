@@ -9,8 +9,9 @@ Esta pasta guarda os scripts que preparam o ambiente. Um script é um arquivo co
 | `setup-docker-wsl.sh` | Instala o Docker no Ubuntu | Uma vez por computador |
 | `create-env.sh` | Cria o `.env` com senhas aleatórias | Uma vez por computador |
 | `gerar_dados_logistica.py` | Cria dados fictícios de logística em CSV | Quando precisar dos dados ou mudar o volume |
+| `backup-dw.sh` | Salva uma cópia do data warehouse | Sempre que quiser, de preferência toda semana |
 
-Os dois arquivos `.sh` rodam no **terminal do Ubuntu**, na pasta do projeto. Eles não funcionam no PowerShell. O arquivo `.py` roda em qualquer sistema com Python.
+Os arquivos `.sh` rodam no **terminal do Ubuntu**, na pasta do projeto. Eles não funcionam no PowerShell. O arquivo `.py` roda em qualquer sistema com Python.
 
 ## `setup-docker-wsl.sh`
 
@@ -74,11 +75,16 @@ Na primeira execução, o DuckDB precisa de internet para baixar a extensão do 
 
 | Opção | Padrão | O que faz |
 |---|---|---|
-| `--escala` | `1` | Define o volume. A escala 1 gera 1,5 milhão de pedidos, 6 milhões de itens e ocupa cerca de 2,2 GB |
+| `--escala` | `1` | Define o volume. A escala 1 gera 1,5 milhão de pedidos, 6 milhões de itens e ocupa cerca de 2,3 GB |
 | `--saida` | `data` | Define a pasta dos arquivos |
-| `--data-corte` | `2026-11-01` | Define o que os dados tratam como hoje |
+| `--data-corte` | `2026-11-01` | Define o dia da foto da operação |
+| `--dias-lote` | `365` | Define quantos dias de lotes diários vêm depois da data de corte |
 
 Os mesmos parâmetros e a mesma versão do DuckDB geram os mesmos arquivos. A pasta `data/` fica fora do Git, porque os arquivos são grandes e podem ser recriados.
+
+**Não gere de novo com outros parâmetros depois da carga.** Datas e notas fiscais mudam, e os novos arquivos não combinam com o que já está no banco.
+
+**Quando os lotes acabarem,** um ano depois da data de corte, a carga para de receber novidades. Gere de novo com uma data de corte mais recente e carregue em um banco vazio.
 
 **O que ele gera:**
 
@@ -89,8 +95,10 @@ Os mesmos parâmetros e a mesma versão do DuckDB geram os mesmos arquivos. A pa
 | `data/simulado/` | `clientes`, `produtos` | Cadastros principais |
 | `data/simulado/` | `pedidos`, `itens_pedido` | Vendas |
 | `data/simulado/` | `notas_fiscais`, `entregas` | Faturamento e transporte |
+| `data/lotes/` | `pedidos`, `itens_pedido`, `notas_fiscais`, `entregas` | O que mudou em cada dia depois da data de corte |
+| `data/` | `manifesto.json` | Data de corte, lida pela carga |
 
-O arquivo `entregas` tem origem, destino, transportadora, datas, peso e frete, os campos que a tabela `marts.fact_shipment` espera.
+**Foto e lotes:** `data/simulado/` mostra a operação como ela estava na data de corte. `data/lotes/` simula o sistema de origem exportando as novidades de cada dia, em pastas como `data_lote=2026-11-02`. Um pedido aparece no lote do dia em que foi feito e volta nos lotes em que for enviado e entregue, com o status atualizado.
 
 **Como os dados são simulados:**
 
@@ -108,6 +116,24 @@ O arquivo `entregas` tem origem, destino, transportadora, datas, peso e frete, o
 - As notas não têm valor fiscal, e as alíquotas são uma simplificação.
 - O número de pedidos é quase igual em todos os meses, porque essa distribuição vem do TPC-H.
 - Coordenadas e distâncias são aproximadas. A cabotagem pode aparecer para cidades sem porto.
+
+## `backup-dw.sh`
+
+**Por que existe:** os dados do DW ficam em um volume do Docker. Se o disco falhar ou alguém rodar `docker compose down -v`, sem cópia eles se perdem.
+
+**Como rodar:**
+
+```bash
+bash scripts/backup-dw.sh
+```
+
+Ele salva um arquivo em `backups/` e apaga os mais antigos, mantendo os 7 mais recentes. A pasta fica fora do Git.
+
+**Para restaurar**, troque o nome do arquivo no comando abaixo. A opção `--clean` **substitui os dados atuais** do banco pelos da cópia:
+
+```bash
+docker compose exec -T postgres-dw pg_restore -U dw_admin -d dw_logistica --clean --if-exists < backups/nome-do-arquivo.dump
+```
 
 ## Como criar um script novo
 

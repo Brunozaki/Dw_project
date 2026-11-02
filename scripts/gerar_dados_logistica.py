@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """Gera dados fictícios de logística no Brasil, em CSV, a partir do TPC-H.
 
-Uso: python scripts/gerar_dados_logistica.py [--escala 1] [--saida data] [--data-corte 2026-11-01]
+Uso: python scripts/gerar_dados_logistica.py [--escala 1] [--saida data]
+         [--data-corte 2026-11-01] [--dias-lote 365]
 
 O TPC-H define o volume e a estrutura de pedidos e itens. Os demais dados são
 simulados: o mesmo comando, com os mesmos parâmetros, gera os mesmos arquivos.
+
+A pasta simulado/ é a foto da operação na data de corte. A pasta lotes/ traz, para
+cada dia seguinte, o que mudou nesse dia, como uma exportação diária do sistema de origem.
 """
 import argparse
-from datetime import date
+import json
+import shutil
+from datetime import date, timedelta
 from pathlib import Path
 
 import duckdb
@@ -225,6 +231,13 @@ def exportar(con, consulta, arquivo):
     print(f"{arquivo}: {linhas:,} linhas".replace(",", "."))
 
 
+def exportar_lotes(con, consulta, pasta):
+    pasta.parent.mkdir(parents=True, exist_ok=True)
+    con.execute(f"COPY ({consulta}) TO '{pasta.as_posix()}' (FORMAT CSV, HEADER, PARTITION_BY (data_lote))")
+    linhas = con.execute(f"SELECT count(*) FROM ({consulta})").fetchone()[0]
+    print(f"{pasta}: {linhas:,} linhas".replace(",", "."))
+
+
 def criar_referencias(con):
     criar_tabela(
         con, "ref_cidade", "cidade VARCHAR, uf VARCHAR, lat DOUBLE, lon DOUBLE, pop INTEGER, cep3 VARCHAR", CIDADES
@@ -271,6 +284,12 @@ def criar_referencias(con):
             + cos(radians(lat1)) * cos(radians(lat2)) * pow(sin(radians(lon2 - lon1) / 2), 2)
         ));
         CREATE MACRO sem_domingo(d) AS CASE WHEN dayofweek(d) = 0 THEN d + 1 ELSE d END;
+        CREATE MACRO status_em(cancelado, data_envio, data_entrega, dia) AS CASE
+            WHEN cancelado THEN 'cancelado'
+            WHEN data_envio > dia THEN 'aguardando_envio'
+            WHEN data_entrega > dia THEN 'em_transito'
+            ELSE 'entregue'
+        END;
     """)
     con.execute("""
         CREATE TABLE locais AS
@@ -345,7 +364,7 @@ def criar_cadastros(con):
     """)
 
 
-def criar_movimento(con, data_corte):
+def criar_movimento(con, horizonte):
     con.execute("""
         CREATE TABLE itens AS
         SELECT l.l_orderkey AS chave_pedido,
@@ -364,7 +383,7 @@ def criar_movimento(con, data_corte):
     con.execute(f"""
         CREATE TABLE pedidos_base AS
         WITH deslocamento AS (
-            SELECT (DATE '{data_corte}' - 1 - max(o_orderdate))::INTEGER AS dias FROM orders
+            SELECT (DATE '{horizonte}' - 1 - max(o_orderdate))::INTEGER AS dias FROM orders
         ),
         totais AS (
             SELECT chave_pedido, sum(valor_bruto) AS valor_produtos, sum(valor_desconto) AS valor_desconto,
@@ -436,23 +455,16 @@ def criar_movimento(con, data_corte):
         FROM prazo;
 
         CREATE TABLE pedidos AS
-        SELECT *,
-               CASE
-                   WHEN u('cancelado', chave) < 0.02 THEN 'cancelado'
-                   WHEN data_envio > DATE '{data_corte}' THEN 'aguardando_envio'
-                   WHEN data_entrega_simulada > DATE '{data_corte}' THEN 'em_transito'
-                   ELSE 'entregue'
-               END AS status
-        FROM pedidos_prazo;
+        SELECT *, u('cancelado', chave) < 0.02 AS cancelado FROM pedidos_prazo;
     """)
 
-    con.execute(f"""
+    con.execute("""
         CREATE TABLE notas AS
         WITH emitidas AS (
             SELECT p.*, d.cnpj AS cnpj_emitente, d.uf AS uf_origem, d.regiao AS regiao_origem, d.cuf,
                    row_number() OVER (PARTITION BY p.codigo_cd ORDER BY p.data_envio, p.chave) AS numero
             FROM pedidos p JOIN centros d ON d.codigo = p.codigo_cd
-            WHERE p.status IN ('em_transito', 'entregue')
+            WHERE NOT p.cancelado
         ),
         chaves AS (
             SELECT *,
@@ -476,6 +488,78 @@ def exportar_tpch(con, saida):
         exportar(con, f"SELECT * FROM {tabela}", saida / "tpch" / f"{tabela}.csv")
 
 
+def criar_estados(con, data_corte, horizonte):
+    """Define quais pedidos entram na foto e em cada lote diário."""
+    con.execute(f"""
+        CREATE TABLE estado_foto AS
+        SELECT chave, DATE '{data_corte}' AS data_lote, true AS foto
+        FROM pedidos WHERE data_pedido <= DATE '{data_corte}';
+
+        CREATE TABLE estado_lotes AS
+        WITH eventos AS (
+            SELECT chave, data_pedido AS dia FROM pedidos
+            UNION
+            SELECT chave, data_envio FROM pedidos WHERE NOT cancelado
+            UNION
+            SELECT chave, data_entrega_simulada FROM pedidos WHERE NOT cancelado
+        )
+        SELECT chave, dia AS data_lote, false AS foto
+        FROM eventos WHERE dia > DATE '{data_corte}' AND dia <= DATE '{horizonte}';
+    """)
+
+
+def consultas_movimento(estado):
+    """Monta as consultas de cada arquivo, com a situação do pedido na data do lote."""
+    return {
+        "pedidos": f"""
+            SELECT e.data_lote, p.codigo, p.codigo_cliente, p.codigo_cd, p.data_pedido,
+                   status_em(p.cancelado, p.data_envio, p.data_entrega_simulada, e.data_lote) AS status,
+                   p.tipo_frete, p.valor_produtos, p.valor_desconto, p.valor_frete,
+                   p.valor_produtos - p.valor_desconto + p.valor_frete AS valor_total
+            FROM {estado} e JOIN pedidos p USING (chave)
+        """,
+        # Itens e notas não mudam: entram só no lote em que surgem.
+        "itens_pedido": f"""
+            SELECT e.data_lote, p.codigo AS codigo_pedido, i.numero_item, i.codigo_produto, i.quantidade,
+                   i.preco_unitario, i.desconto_pct, i.valor_bruto, i.valor_desconto,
+                   i.valor_bruto - i.valor_desconto AS valor_liquido, i.peso_kg, i.volume_m3
+            FROM {estado} e
+            JOIN pedidos p USING (chave)
+            JOIN itens i ON i.chave_pedido = p.chave
+            WHERE e.foto OR e.data_lote = p.data_pedido
+        """,
+        "notas_fiscais": f"""
+            SELECT e.data_lote, n.chave_nfe, n.numero, '001' AS serie, n.data_envio AS data_emissao,
+                   n.codigo AS codigo_pedido, n.cnpj_emitente, n.cnpj_cliente AS cnpj_destinatario,
+                   CASE WHEN n.uf_origem = n.uf_destino THEN '5102' ELSE '6102' END AS cfop,
+                   n.aliquota_icms,
+                   round((n.valor_produtos - n.valor_desconto) * n.aliquota_icms / 100, 2)::DECIMAL(14, 2) AS valor_icms,
+                   n.valor_produtos, n.valor_desconto,
+                   CASE WHEN n.tipo_frete = 'CIF' THEN n.valor_frete ELSE 0 END AS valor_frete,
+                   n.valor_produtos - n.valor_desconto
+                   + CASE WHEN n.tipo_frete = 'CIF' THEN n.valor_frete ELSE 0 END AS valor_total
+            FROM {estado} e JOIN notas n USING (chave)
+            WHERE n.data_envio <= e.data_lote AND (e.foto OR n.data_envio = e.data_lote)
+        """,
+        "entregas": f"""
+            SELECT e.data_lote, 'ENT-' || lpad(n.chave::VARCHAR, 9, '0') AS codigo, n.codigo AS codigo_pedido,
+                   n.chave_nfe, n.codigo_transportadora, d.codigo_local AS local_origem, n.local_destino, n.modal,
+                   round(n.distancia_km, 1) AS distancia_km, n.data_envio, n.data_previsao,
+                   CASE WHEN n.data_entrega_simulada <= e.data_lote THEN n.data_entrega_simulada END AS data_entrega,
+                   n.peso_kg, n.volume_m3, n.valor_frete,
+                   CASE
+                       WHEN n.data_entrega_simulada > e.data_lote THEN 'Em trânsito'
+                       WHEN n.atrasou THEN escolher({lista_sql(OCORRENCIAS)}, 'ocorrencia', n.chave)
+                       ELSE 'Sem ocorrência'
+                   END AS ocorrencia
+            FROM {estado} e
+            JOIN notas n USING (chave)
+            JOIN centros d ON d.codigo = n.codigo_cd
+            WHERE n.data_envio <= e.data_lote
+        """,
+    }
+
+
 def exportar_simulado(con, saida):
     pasta = saida / "simulado"
     exportar(con, "SELECT codigo, cidade, uf, regiao, pais, lat AS latitude, lon AS longitude FROM locais ORDER BY codigo",
@@ -492,44 +576,22 @@ def exportar_simulado(con, saida):
     exportar(con, """
         SELECT codigo, descricao, categoria, marca, preco_unitario, peso_kg, volume_m3 FROM produtos ORDER BY codigo
     """, pasta / "produtos.csv")
-    exportar(con, """
-        SELECT codigo, codigo_cliente, codigo_cd, data_pedido, status, tipo_frete,
-               valor_produtos, valor_desconto, valor_frete,
-               valor_produtos - valor_desconto + valor_frete AS valor_total
-        FROM pedidos ORDER BY codigo
-    """, pasta / "pedidos.csv")
-    exportar(con, """
-        SELECT p.codigo AS codigo_pedido, i.numero_item, i.codigo_produto, i.quantidade, i.preco_unitario,
-               i.desconto_pct, i.valor_bruto, i.valor_desconto, i.valor_bruto - i.valor_desconto AS valor_liquido,
-               i.peso_kg, i.volume_m3
-        FROM itens i JOIN pedidos p ON p.chave = i.chave_pedido
-        ORDER BY p.codigo, i.numero_item
-    """, pasta / "itens_pedido.csv")
-    exportar(con, """
-        SELECT chave_nfe, numero, '001' AS serie, data_envio AS data_emissao, codigo AS codigo_pedido,
-               cnpj_emitente, cnpj_cliente AS cnpj_destinatario,
-               CASE WHEN uf_origem = uf_destino THEN '5102' ELSE '6102' END AS cfop,
-               aliquota_icms,
-               round((valor_produtos - valor_desconto) * aliquota_icms / 100, 2)::DECIMAL(14, 2) AS valor_icms,
-               valor_produtos, valor_desconto,
-               CASE WHEN tipo_frete = 'CIF' THEN valor_frete ELSE 0 END AS valor_frete,
-               valor_produtos - valor_desconto + CASE WHEN tipo_frete = 'CIF' THEN valor_frete ELSE 0 END AS valor_total
-        FROM notas ORDER BY codigo
-    """, pasta / "notas_fiscais.csv")
-    exportar(con, f"""
-        SELECT 'ENT-' || lpad(n.chave::VARCHAR, 9, '0') AS codigo, n.codigo AS codigo_pedido, n.chave_nfe,
-               n.codigo_transportadora, d.codigo_local AS local_origem, n.local_destino, n.modal,
-               round(n.distancia_km, 1) AS distancia_km, n.data_envio, n.data_previsao,
-               CASE WHEN n.status = 'entregue' THEN n.data_entrega_simulada END AS data_entrega,
-               n.peso_kg, n.volume_m3, n.valor_frete,
-               CASE
-                   WHEN n.status = 'em_transito' THEN 'Em trânsito'
-                   WHEN n.atrasou THEN escolher({lista_sql(OCORRENCIAS)}, 'ocorrencia', n.chave)
-                   ELSE 'Sem ocorrência'
-               END AS ocorrencia
-        FROM notas n JOIN centros d ON d.codigo = n.codigo_cd
-        ORDER BY n.codigo
-    """, pasta / "entregas.csv")
+    ordens = {
+        "pedidos": "codigo",
+        "itens_pedido": "codigo_pedido, numero_item",
+        "notas_fiscais": "codigo_pedido",
+        "entregas": "codigo",
+    }
+    for nome, consulta in consultas_movimento("estado_foto").items():
+        exportar(con, f"SELECT * EXCLUDE (data_lote) FROM ({consulta}) ORDER BY {ordens[nome]}",
+                 pasta / f"{nome}.csv")
+
+
+def exportar_lotes_diarios(con, saida):
+    pasta = saida / "lotes"
+    shutil.rmtree(pasta, ignore_errors=True)
+    for nome, consulta in consultas_movimento("estado_lotes").items():
+        exportar_lotes(con, consulta, pasta / nome)
 
 
 def main():
@@ -537,8 +599,10 @@ def main():
     parser.add_argument("--escala", type=float, default=1, help="fator de escala do TPC-H (1 = 1,5 milhão de pedidos)")
     parser.add_argument("--saida", type=Path, default=Path("data"), help="pasta de destino dos CSVs")
     parser.add_argument("--data-corte", type=date.fromisoformat, default=date(2026, 11, 1),
-                        help="data que os dados tratam como hoje")
+                        help="data que a foto da operação trata como hoje")
+    parser.add_argument("--dias-lote", type=int, default=365, help="dias de lotes diários depois da data de corte")
     args = parser.parse_args()
+    horizonte = args.data_corte + timedelta(days=args.dias_lote)
 
     args.saida.mkdir(parents=True, exist_ok=True)
     arquivo_temp = args.saida / ".geracao.duckdb"
@@ -550,8 +614,13 @@ def main():
         exportar_tpch(con, args.saida)
         criar_referencias(con)
         criar_cadastros(con)
-        criar_movimento(con, args.data_corte)
+        criar_movimento(con, horizonte)
+        criar_estados(con, args.data_corte, horizonte)
         exportar_simulado(con, args.saida)
+        exportar_lotes_diarios(con, args.saida)
+        (args.saida / "manifesto.json").write_text(
+            json.dumps({"data_corte": args.data_corte.isoformat(), "dias_lote": args.dias_lote}), encoding="utf-8"
+        )
     finally:
         con.close()
         arquivo_temp.unlink(missing_ok=True)
