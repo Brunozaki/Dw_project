@@ -4,7 +4,8 @@ from datetime import datetime, timedelta
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import dag, task
 
-DW_CONN_ID = "dw_postgres"
+from logistica.auditoria import DW_CONN_ID, registrar_execucao, registrar_falha
+
 EXPECTED_SCHEMAS = {"raw", "staging", "marts", "audit"}
 
 
@@ -13,7 +14,7 @@ EXPECTED_SCHEMAS = {"raw", "staging", "marts", "audit"}
     schedule="0 6 * * *",
     start_date=datetime(2026, 11, 1),
     catchup=False,
-    default_args={"retries": 2, "retry_delay": timedelta(minutes=5)},
+    default_args={"retries": 2, "retry_delay": timedelta(minutes=5), "on_failure_callback": registrar_falha},
     tags=["dw", "infra"],
 )
 def dw_healthcheck():
@@ -27,15 +28,7 @@ def dw_healthcheck():
 
     @task
     def record_run(**context):
-        hook = PostgresHook(postgres_conn_id=DW_CONN_ID)
-        hook.run(
-            """
-            INSERT INTO audit.load_run (dag_id, run_id, status)
-            VALUES (%s, %s, 'success')
-            ON CONFLICT (dag_id, run_id) DO NOTHING
-            """,
-            parameters=(context["dag"].dag_id, context["run_id"]),
-        )
+        registrar_execucao(context["dag"].dag_id, context["run_id"], "success")
 
     check_schemas() >> record_run()
 

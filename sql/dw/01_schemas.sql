@@ -15,6 +15,15 @@ CREATE TABLE IF NOT EXISTS audit.load_run (
     run_id       text        NOT NULL,
     status       text        NOT NULL,
     rows_loaded  bigint      NOT NULL DEFAULT 0,
+    error        text,
     finished_at  timestamptz NOT NULL DEFAULT now(),
     UNIQUE (dag_id, run_id)
+);
+
+-- Um lote só entra aqui depois de carregado por inteiro.
+CREATE TABLE IF NOT EXISTS audit.loaded_batch (
+    batch_date   date        PRIMARY KEY,
+    load_run_id  bigint      NOT NULL REFERENCES audit.load_run,
+    rows_loaded  bigint      NOT NULL,
+    loaded_at    timestamptz NOT NULL DEFAULT now()
 );

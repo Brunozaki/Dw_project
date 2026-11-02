@@ -14,8 +14,10 @@ x-airflow-common: &airflow-common
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?}
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW_CONN_DW_POSTGRES: postgresql://${DW_USER:?}:${DW_PASSWORD:?}@postgres-dw:5432/${DW_DB:?}
+    DW_DATA_DIR: /opt/airflow/data
   volumes:
     - ./dags:/opt/airflow/dags:ro
+    - ./data:/opt/airflow/data:ro
     # Volume nomeado: chown em bind mount de /mnt/d costuma falhar no WSL.
     - airflow-logs:/opt/airflow/logs
   depends_on: &airflow-common-depends-on
